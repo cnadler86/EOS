@@ -58,6 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ gfortran \
     libopenblas-dev liblapack-dev \
     pkg-config python3-dev\
+    libjpeg62 \
     && rm -rf /var/lib/apt/lists/*
 
 # - Create venv
