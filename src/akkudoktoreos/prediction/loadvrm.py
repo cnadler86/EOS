@@ -62,16 +62,7 @@ class LoadVrm(LoadProvider):
     def _request_forecast(self, start_ts: int, end_ts: int) -> VrmForecastResponse:
         """Fetch forecast data from Victron VRM API."""
         base_url = "https://vrmapi.victronenergy.com/v2/installations"
-        vrm_settings = (
-            self.config.load.provider_settings.LoadVrm
-            if self.config.load.provider_settings is not None
-            else None
-        )
-        if vrm_settings is None:
-            raise ValueError(
-                "LoadVrm provider_settings not configured "
-                "(config.load.provider_settings.LoadVrm is None)"
-            )
+        vrm_settings = self.config.load.loadvrm
         installation_id = vrm_settings.load_vrm_idsite
         api_token = vrm_settings.load_vrm_token
 
