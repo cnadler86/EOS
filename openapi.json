@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.2.0.dev2602240695620513"
+    "version": "v0.2.0.dev2602240911229742"
   },
   "paths": {
     "/v1/admin/cache/clear": {
@@ -4451,7 +4451,7 @@
             "type": "string",
             "title": "Version",
             "description": "Configuration file version. Used to check compatibility.",
-            "default": "0.2.0.dev2602240695620513"
+            "default": "0.2.0.dev2602240911229742"
           },
           "data_folder_path": {
             "type": "string",
@@ -4514,7 +4514,7 @@
             "type": "string",
             "title": "Version",
             "description": "Configuration file version. Used to check compatibility.",
-            "default": "0.2.0.dev2602240695620513"
+            "default": "0.2.0.dev2602240911229742"
           },
           "data_folder_path": {
             "type": "string",
@@ -5942,55 +5942,6 @@
         "title": "LoadAkkudoktorCommonSettings",
         "description": "Common settings for load data import from file."
       },
-      "LoadCommonProviderSettings": {
-        "properties": {
-          "LoadAkkudoktor": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LoadAkkudoktorCommonSettings"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "LoadAkkudoktor settings",
-            "examples": [
-              null
-            ]
-          },
-          "LoadVrm": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LoadVrmCommonSettings"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "LoadVrm settings",
-            "examples": [
-              null
-            ]
-          },
-          "LoadImport": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LoadImportCommonSettings"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "LoadImport settings",
-            "examples": [
-              null
-            ]
-          }
-        },
-        "type": "object",
-        "title": "LoadCommonProviderSettings",
-        "description": "Load Prediction Provider Configuration."
-      },
       "LoadCommonSettings-Input": {
         "properties": {
           "provider": {
@@ -6008,12 +5959,17 @@
               "LoadAkkudoktor"
             ]
           },
-          "provider_settings": {
-            "$ref": "#/components/schemas/LoadCommonProviderSettings",
-            "description": "Provider settings",
-            "examples": [
-              {}
-            ]
+          "loadakkudoktor": {
+            "$ref": "#/components/schemas/LoadAkkudoktorCommonSettings",
+            "description": "LoadAkkudoktor provider settings."
+          },
+          "loadvrm": {
+            "$ref": "#/components/schemas/LoadVrmCommonSettings",
+            "description": "LoadVrm provider settings."
+          },
+          "loadimport": {
+            "$ref": "#/components/schemas/LoadImportCommonSettings",
+            "description": "LoadImport provider settings."
           }
         },
         "type": "object",
@@ -6037,12 +5993,17 @@
               "LoadAkkudoktor"
             ]
           },
-          "provider_settings": {
-            "$ref": "#/components/schemas/LoadCommonProviderSettings",
-            "description": "Provider settings",
-            "examples": [
-              {}
-            ]
+          "loadakkudoktor": {
+            "$ref": "#/components/schemas/LoadAkkudoktorCommonSettings",
+            "description": "LoadAkkudoktor provider settings."
+          },
+          "loadvrm": {
+            "$ref": "#/components/schemas/LoadVrmCommonSettings",
+            "description": "LoadVrm provider settings."
+          },
+          "loadimport": {
+            "$ref": "#/components/schemas/LoadImportCommonSettings",
+            "description": "LoadImport provider settings."
           },
           "providers": {
             "items": {
@@ -6106,19 +6067,31 @@
       "LoadVrmCommonSettings": {
         "properties": {
           "load_vrm_token": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Load Vrm Token",
             "description": "Token for Connecting VRM API",
-            "default": "your-token",
             "examples": [
               "your-token"
             ]
           },
           "load_vrm_idsite": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Load Vrm Idsite",
             "description": "VRM-Installation-ID",
-            "default": 12345,
             "examples": [
               12345
             ]
@@ -7922,19 +7895,31 @@
       "PVForecastVrmCommonSettings": {
         "properties": {
           "pvforecast_vrm_token": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Pvforecast Vrm Token",
             "description": "Token for Connecting VRM API",
-            "default": "your-token",
             "examples": [
               "your-token"
             ]
           },
           "pvforecast_vrm_idsite": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Pvforecast Vrm Idsite",
             "description": "VRM-Installation-ID",
-            "default": 12345,
             "examples": [
               12345
             ]
@@ -8785,13 +8770,6 @@
           "type": {
             "type": "string",
             "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
           }
         },
         "type": "object",

@@ -192,8 +192,8 @@
 
 | Name | Type | Read-Only | Default | Description |
 | ---- | ---- | --------- | ------- | ----------- |
-| pvforecast_vrm_idsite | `int` | `rw` | `12345` | VRM-Installation-ID |
-| pvforecast_vrm_token | `str` | `rw` | `your-token` | Token for Connecting VRM API |
+| pvforecast_vrm_idsite | `Optional[int]` | `rw` | `None` | VRM-Installation-ID |
+| pvforecast_vrm_token | `Optional[str]` | `rw` | `None` | Token for Connecting VRM API |
 :::
 <!-- pyml enable line-length -->
 

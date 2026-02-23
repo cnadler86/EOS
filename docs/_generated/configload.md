@@ -28,8 +28,8 @@
                "loadakkudoktor_year_energy_kwh": null
            },
            "loadvrm": {
-               "load_vrm_token": "your-token",
-               "load_vrm_idsite": 12345
+               "load_vrm_token": null,
+               "load_vrm_idsite": null
            },
            "loadimport": {
                "import_file_path": null,
@@ -53,8 +53,8 @@
                "loadakkudoktor_year_energy_kwh": null
            },
            "loadvrm": {
-               "load_vrm_token": "your-token",
-               "load_vrm_idsite": 12345
+               "load_vrm_token": null,
+               "load_vrm_idsite": null
            },
            "loadimport": {
                "import_file_path": null,
@@ -80,8 +80,8 @@
 
 | Name | Type | Read-Only | Default | Description |
 | ---- | ---- | --------- | ------- | ----------- |
-| load_vrm_idsite | `int` | `rw` | `12345` | VRM-Installation-ID |
-| load_vrm_token | `str` | `rw` | `your-token` | Token for Connecting VRM API |
+| load_vrm_idsite | `Optional[int]` | `rw` | `None` | VRM-Installation-ID |
+| load_vrm_token | `Optional[str]` | `rw` | `None` | Token for Connecting VRM API |
 :::
 <!-- pyml enable line-length -->
 
