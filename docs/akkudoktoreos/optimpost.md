@@ -171,12 +171,48 @@ Verify prices against your local tariffs.
 - `max_ac_charge_power_w`: Maximum AC charging power in watts. `null` means no additional limit
   (battery's own `max_charge_power_w` applies). Set to `0` to disable AC charging. Default `null`.
 
-#### Efficiency Model
+#### PV Coupling & Efficiency Model
 
-The inverter efficiency parameters cleanly separate the **DC battery efficiency** from the
-**AC↔DC inverter conversion efficiency**:
+PV coupling is configured on each **PV forecast plane** via the `connected_to` field, not on the
+inverter. This allows mixed topologies where some panels are DC-coupled and others AC-coupled.
 
-- **DC charging from PV surplus**: PV → Battery (direct DC, only `charging_efficiency` applies)
+```json
+{
+  "pvforecast": {
+    "planes": [
+      { "peakpower": 6.0, "surface_azimuth": 180, "surface_tilt": 30,
+        "connected_to": "inv1" },
+      { "peakpower": 4.0, "surface_azimuth": 90, "surface_tilt": 30,
+        "connected_to": "pv_inverter_east" }
+    ]
+  }
+}
+```
+
+**`connected_to` rules:**
+- `null` (default) or matching the simulation inverter's `device_id` or the battery's `device_id`
+  → **DC-coupled**: PV charges battery directly via DC bus. Only battery `charging_efficiency`
+  applies; no extra inverter conversion loss.
+- Any other device ID (e.g. a separate PV-inverter) → **AC-coupled**: PV surplus first goes to
+  the AC bus and must pass through AC→DC conversion (`ac_to_dc_efficiency`) before reaching the
+  battery.
+
+When planes have mixed coupling, the optimizer computes a weighted `pv_dc_power_fraction`
+(fraction of total installed peak power that is DC-coupled):
+
+```text
+pv_dc_power_fraction = Σ peakpower(DC planes) / Σ peakpower(all planes)
+```
+
+This fraction linearly blends the two efficiency paths:
+
+- **Fully DC-coupled** (`pv_dc_power_fraction = 1.0`, default):
+  PV → Battery (direct DC, only `charging_efficiency` applies)
+- **Fully AC-coupled** (`pv_dc_power_fraction = 0.0`):
+  PV → PV-Inverter (DC→AC) → AC bus → Battery-Inverter (`ac_to_dc_efficiency`) → Battery
+- **Mixed** (e.g. `0.6`): 60 % of PV power is on the DC path, 40 % passes through AC→DC.
+
+Other paths are unaffected by PV coupling:
 - **AC charging from grid**: Grid (AC) → Inverter (`ac_to_dc_efficiency`) → Battery
   (`charging_efficiency`)
 - **Discharging to AC load/grid**: Battery (`discharging_efficiency`) → Inverter
@@ -185,13 +221,17 @@ The inverter efficiency parameters cleanly separate the **DC battery efficiency*
 Round-trip efficiency for AC charging and discharging:
 `η_round_trip = ac_to_dc_efficiency × charging_efficiency × discharging_efficiency × dc_to_ac_efficiency`
 
+Round-trip efficiency for PV→battery→AC load:
+- DC-coupled: `η_pv_rt = charging_efficiency × discharging_efficiency × dc_to_ac_efficiency`
+- AC-coupled: `η_pv_rt = ac_to_dc_efficiency × charging_efficiency × discharging_efficiency × dc_to_ac_efficiency`
+- Mixed fraction *f*: `η_pv_rt = (f + (1−f)×ac_to_dc_efficiency) × charging_efficiency × discharging_efficiency × dc_to_ac_efficiency`
+
 For profitability, the discharge electricity price must exceed:
 `buy_price / η_round_trip`
 
 **Backward compatibility**: With default values (`ac_to_dc_efficiency=1.0`,
-`dc_to_ac_efficiency=1.0`, `max_ac_charge_power_w=null`), existing configurations work identically.
-To model realistic inverter losses, set both efficiencies to a value like `0.95` and adjust
-battery efficiencies to reflect pure DC losses only (typically `0.96`–`0.99` for Li-ion).
+`dc_to_ac_efficiency=1.0`, `max_ac_charge_power_w=null`) and no `connected_to` set on any plane,
+existing configurations work identically (all PV treated as DC-coupled).
 
 #### AC Charging Break-Even Penalty
 
@@ -222,6 +262,31 @@ To tune the aggressiveness of this penalty, set `penalties.ac_charge_break_even`
 optimization configuration. A value of `1.0` corresponds to the exact economic loss in €.
 Larger values (e.g. `3.0`) make the algorithm more aggressively avoid unprofitable AC charging;
 smaller values (e.g. `0.0`) disable the penalty entirely.
+
+#### PV Storage Opportunity Cost Penalty
+
+When `optimization.genetic.optimize_dc_charge` is `true`, the genetic algorithm decides per-hour
+whether PV surplus charges the battery (`dc_charge=1`) or is exported to the grid (`dc_charge=0`).
+
+The PV storage opportunity cost penalty guides this decision by comparing:
+- **Storage value**: `best_future_electricity_price × η_pv_rt` — what the stored energy is worth
+  when discharged later
+- **Export value**: `feed_in_tariff` — what the energy earns if exported immediately
+
+A penalty fires when the GA makes the wrong choice:
+- Storing (`dc_charge=1`) when `feed_in > storage_value` → penalty for wasted opportunity
+- Exporting (`dc_charge=0`) when `storage_value > feed_in` → penalty for missed storage benefit
+
+Penalty magnitude:
+
+```text
+penalty = pv_surplus_wh × |storage_value − feed_in| × factor
+```
+
+Configuration: `optimization.genetic.penalties.pv_storage_opportunity_cost` (default `0.0` =
+disabled). Set to `1.0` and enable `optimize_dc_charge: true` to activate. This is particularly
+valuable when forecasted PV production exceeds battery capacity — the GA then picks the optimal
+hours to charge the battery.
 
 ### Electric Vehicle (EV)
 

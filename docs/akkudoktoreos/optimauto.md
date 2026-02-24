@@ -197,7 +197,24 @@ The behavior of the genetic algorithm can be customized using the following conf
   A value of `1.0` (default) means the penalty equals the actual economic loss in €.
   Use larger values (e.g. `3.0`) to make the optimizer more aggressively avoid unprofitable
   AC charging, or `0.0` to disable this penalty entirely.
+
+- `pv_storage_opportunity_cost`:
+  When `optimize_dc_charge` is enabled, applies a penalty for suboptimal PV→battery charging
+  decisions. For each hour with PV surplus, compares the value of storing the energy
+  (best future price × round-trip efficiency) against the alternative export revenue (feed-in
+  tariff). Penalises both unnecessary storage and missed storage opportunities.
+
+  Default: `0.0` (disabled). Set to `1.0` and combine with `optimize_dc_charge: true` to activate.
+  Particularly valuable when total PV production exceeds battery capacity and the optimizer must
+  pick the best charging windows.
 :::
+
+- **optimize_dc_charge** (`bool`, default: `false`):
+  Enables per-hour optimisation of PV-to-battery (DC) charging. When `true`, the genetic algorithm
+  decides each hour whether PV surplus charges the battery or is exported to the grid. When `false`
+  (default), PV surplus always charges the battery when capacity is available.
+
+  Combine with `penalties.pv_storage_opportunity_cost` for best results.
 
 #### Value Formats
 
@@ -225,8 +242,10 @@ The behavior of the genetic algorithm can be customized using the following conf
             "seed": null,
             "penalties": {
                 "ev_soc_miss": 10,
-                "ac_charge_break_even": 1.0
-            }
+                "ac_charge_break_even": 1.0,
+                "pv_storage_opportunity_cost": 1.0
+            },
+            "optimize_dc_charge": true
         }
     }
 }
@@ -283,6 +302,12 @@ The inverter supports separate AC↔DC conversion efficiencies:
   Must be > 0. Default `1.0`.
 - `max_ac_charge_power_w`: Maximum AC charging power in watts. `null` = no additional limit.
   Set to `0` to disable AC charging. Default `null`.
+
+**PV coupling** is specified on each PV forecast plane via `connected_to`, not on the inverter.
+A plane whose `connected_to` matches the inverter's `device_id` or the battery's `device_id`
+(or is `null`) is DC-coupled (no extra inverter loss). Any other device ID marks an AC-coupled
+plane (PV surplus passes through `ac_to_dc_efficiency` conversion before reaching the battery).
+See **PV Coupling & Efficiency Model** in the POST optimization documentation for details.
 
 #### Electric vehicle simulation configuration
 

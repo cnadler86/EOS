@@ -229,6 +229,11 @@ class GeneticOptimizationParameters(
             # charging at a price that cannot be recovered given the round-trip efficiency
             # and the best available future discharge price (after free PV energy is used).
             cls.config.optimization.genetic.penalties["ac_charge_break_even"] = 1.0
+        if "pv_storage_opportunity_cost" not in cls.config.optimization.genetic.penalties:
+            # Penalty for suboptimal PV-to-battery charging decisions.
+            # Default 0.0 = disabled.  Set > 0 (e.g. 1.0) together with
+            # optimize_dc_charge=true to let the GA pick optimal PV charging windows.
+            cls.config.optimization.genetic.penalties["pv_storage_opportunity_cost"] = 0.0
 
         # Get start solution from last run
         start_solution = None
@@ -551,6 +556,31 @@ class GeneticOptimizationParameters(
                     ]
                 try:
                     inverter_config = cls.config.devices.inverters[0]
+
+                    # Derive pv_dc_power_fraction from pvforecast plane 'connected_to' fields.
+                    # A plane is DC-coupled when its connected_to matches the simulation
+                    # inverter's device_id, the associated battery's device_id, or is None
+                    # (backward-compatible default).  All other plane IDs indicate a separate
+                    # PV inverter on the AC bus (AC-coupled).
+                    _dc_peak = 0.0
+                    _total_peak = 0.0
+                    try:
+                        _pv_planes = cls.config.pvforecast.planes or []
+                        for _plane in _pv_planes:
+                            _pw = float(_plane.peakpower) if _plane.peakpower is not None else 5.0
+                            _total_peak += _pw
+                            _ct = _plane.connected_to
+                            if (
+                                _ct is None
+                                or _ct == inverter_config.device_id
+                                or _ct == battery_config.device_id
+                            ):
+                                _dc_peak += _pw
+                    except Exception:
+                        _dc_peak = 1.0
+                        _total_peak = 1.0
+                    _pv_dc_fraction = _dc_peak / _total_peak if _total_peak > 0 else 1.0
+
                     inverter_params = InverterParameters(
                         device_id=inverter_config.device_id,
                         max_power_wh=inverter_config.max_power_w,
@@ -558,6 +588,7 @@ class GeneticOptimizationParameters(
                         ac_to_dc_efficiency=inverter_config.ac_to_dc_efficiency,
                         dc_to_ac_efficiency=inverter_config.dc_to_ac_efficiency,
                         max_ac_charge_power_w=inverter_config.max_ac_charge_power_w,
+                        pv_dc_power_fraction=_pv_dc_fraction,
                     )
                 except:
                     logger.info(

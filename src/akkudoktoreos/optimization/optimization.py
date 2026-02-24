@@ -51,6 +51,20 @@ class GeneticCommonSettings(SettingsBaseModel):
         },
     )
 
+    optimize_dc_charge: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "Enable per-hour optimisation of PV-to-battery (DC) charging. "
+                "When True the genetic algorithm decides for each hour whether PV "
+                "surplus charges the battery or is exported to the grid. "
+                "Combine with the 'pv_storage_opportunity_cost' penalty for best "
+                "results. Default False (PV always charges battery when surplus)."
+            ),
+            "examples": [False, True],
+        },
+    )
+
 
 class OptimizationCommonSettings(SettingsBaseModel):
     """General Optimization Configuration."""

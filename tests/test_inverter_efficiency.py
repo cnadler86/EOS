@@ -485,6 +485,7 @@ def _make_mock_simulation(
     # Inverter properties
     ac_to_dc_efficiency: float = 0.93,
     dc_to_ac_efficiency: float = 0.95,
+    pv_dc_power_fraction: float = 1.0,    # 1.0 = fully DC-coupled, 0.0 = fully AC-coupled
     # Battery properties
     charging_efficiency: float = 0.95,
     discharging_efficiency: float = 0.95,
@@ -496,6 +497,9 @@ def _make_mock_simulation(
     ac_charge_hours: list | None = None,
     elect_price_hourly: list | None = None,
     load_energy_array: list | None = None,
+    pv_prediction_wh: list | None = None,
+    dc_charge_hours: list | None = None,
+    elect_revenue_per_hour_arr: list | None = None,
 ):
     """Return a mock GeneticSimulation with configurable properties for penalty tests."""
     n = 24
@@ -505,10 +509,17 @@ def _make_mock_simulation(
         elect_price_hourly = [0.0003] * n        # 30 ct/kWh flat
     if load_energy_array is None:
         load_energy_array = [1000.0] * n          # 1 kWh constant load
+    if pv_prediction_wh is None:
+        pv_prediction_wh = [0.0] * n
+    if dc_charge_hours is None:
+        dc_charge_hours = [0.0] * n
+    if elect_revenue_per_hour_arr is None:
+        elect_revenue_per_hour_arr = [0.00008] * n   # 8 ct/kWh feed-in
 
     inv = SimpleNamespace(
         ac_to_dc_efficiency=ac_to_dc_efficiency,
         dc_to_ac_efficiency=dc_to_ac_efficiency,
+        pv_dc_power_fraction=pv_dc_power_fraction,
     )
     bat = SimpleNamespace(
         charging_efficiency=charging_efficiency,
@@ -527,6 +538,9 @@ def _make_mock_simulation(
     sim.ac_charge_hours = np.array(ac_charge_hours, dtype=float)
     sim.elect_price_hourly = np.array(elect_price_hourly, dtype=float)
     sim.load_energy_array = np.array(load_energy_array, dtype=float)
+    sim.pv_prediction_wh = np.array(pv_prediction_wh, dtype=float)
+    sim.dc_charge_hours = np.array(dc_charge_hours, dtype=float)
+    sim.elect_revenue_per_hour_arr = np.array(elect_revenue_per_hour_arr, dtype=float)
     return sim
 
 
@@ -535,6 +549,8 @@ def _run_evaluate_with_mocked_sim(
     mock_sim,
     *,
     ac_charge_break_even: float = 1.0,
+    pv_storage_opportunity_cost: float = 0.0,
+    optimize_dc_charge: bool = False,
     start_hour: int = 0,
     base_gesamtbilanz: float = 0.0,
 ):
@@ -555,12 +571,14 @@ def _run_evaluate_with_mocked_sim(
     config_eos.optimization.genetic.penalties = {
         "ev_soc_miss": 10,
         "ac_charge_break_even": ac_charge_break_even,
+        "pv_storage_opportunity_cost": pv_storage_opportunity_cost,
     }
 
     optim = GeneticOptimization.__new__(GeneticOptimization)
     # Minimal __init__ state expected by evaluate()
     optim.config = config_eos
     optim.optimize_ev = False
+    optim.optimize_dc_charge = optimize_dc_charge
     optim.verbose = False
     optim.opti_param = {"home_appliance": 0}
     optim.simulation = mock_sim
@@ -878,3 +896,463 @@ class TestAcChargeBreakEvenPenalty:
         # = (6000 - 500) * 0.95 * 0.95 = 5500 * 0.9025 = 4963.75
         expected = 5500.0 * 0.95 * 0.95
         assert free_ac_wh == pytest.approx(expected, rel=1e-9)
+
+
+# ===================================================================
+# 6. PV coupling – DC vs AC coupled PV charging
+# ===================================================================
+
+
+class TestPvCoupling:
+    """Test inverter PV-to-battery path for DC-coupled and AC-coupled systems.
+
+    DC-coupled: PV charges battery directly (no inverter conversion loss).
+    AC-coupled: PV surplus must pass through AC→DC conversion before battery.
+    """
+
+    @pytest.fixture
+    def simulation_setup(self, config_eos):
+        """Set up a minimal GeneticSimulation with configurable pv_dc_power_fraction."""
+        from akkudoktoreos.optimization.genetic.genetic import GeneticSimulation
+        from akkudoktoreos.optimization.genetic.geneticparams import (
+            GeneticEnergyManagementParameters,
+        )
+
+        config_eos.merge_settings_from_dict(
+            {"prediction": {"hours": 48}, "optimization": {"hours": 24}}
+        )
+
+        prediction_hours = config_eos.prediction.hours
+
+        def _build(
+            pv_dc_power_fraction: float = 1.0,  # 1.0=DC-coupled, 0.0=AC-coupled
+            ac_to_dc_efficiency: float = 1.0,
+            dc_to_ac_efficiency: float = 1.0,
+            max_ac_charge_power_w=None,
+            battery_capacity_wh: int = 10000,
+            battery_charging_efficiency: float = 0.90,
+            battery_discharging_efficiency: float = 0.90,
+            battery_initial_soc_pct: int = 10,
+            battery_max_charge_power_w: int = 5000,
+            pv_generation: float = 3000.0,
+            load: float = 1000.0,
+        ):
+            akku = Battery(
+                SolarPanelBatteryParameters(
+                    device_id="battery1",
+                    capacity_wh=battery_capacity_wh,
+                    initial_soc_percentage=battery_initial_soc_pct,
+                    charging_efficiency=battery_charging_efficiency,
+                    discharging_efficiency=battery_discharging_efficiency,
+                    min_soc_percentage=0,
+                    max_soc_percentage=100,
+                    max_charge_power_w=battery_max_charge_power_w,
+                ),
+                prediction_hours=prediction_hours,
+            )
+            akku.reset()
+
+            inverter = Inverter(
+                InverterParameters(
+                    device_id="inverter1",
+                    max_power_wh=10000,
+                    battery_id="battery1",
+                    pv_dc_power_fraction=pv_dc_power_fraction,
+                    ac_to_dc_efficiency=ac_to_dc_efficiency,
+                    dc_to_ac_efficiency=dc_to_ac_efficiency,
+                    max_ac_charge_power_w=max_ac_charge_power_w,
+                ),
+                battery=akku,
+            )
+
+            sim = GeneticSimulation()
+            sim.prepare(
+                GeneticEnergyManagementParameters(
+                    pv_prognose_wh=[pv_generation] * prediction_hours,
+                    strompreis_euro_pro_wh=[0.0003] * prediction_hours,
+                    einspeiseverguetung_euro_pro_wh=0.00008,
+                    preis_euro_pro_wh_akku=0.0001,
+                    gesamtlast=[load] * prediction_hours,
+                ),
+                optimization_hours=config_eos.optimization.horizon_hours,
+                prediction_hours=prediction_hours,
+                inverter=inverter,
+                ev=None,
+                home_appliance=None,
+            )
+            return sim, akku, inverter
+
+        return _build
+
+    def test_pv_dc_fraction_default_is_fully_dc(self):
+        """InverterParameters defaults to pv_dc_power_fraction=1.0 (fully DC-coupled)."""
+        params = InverterParameters(device_id="inv1", max_power_wh=5000)
+        assert params.pv_dc_power_fraction == pytest.approx(1.0)
+
+    def test_dc_coupled_pv_no_inverter_loss(self, simulation_setup):
+        """DC-coupled PV: only battery charging_efficiency loss, NO inverter loss."""
+        sim, akku, inverter = simulation_setup(
+            pv_dc_power_fraction=1.0,
+            ac_to_dc_efficiency=0.90,  # should NOT apply for DC path
+            battery_charging_efficiency=0.90,
+            pv_generation=3000.0,
+            load=1000.0,
+            battery_initial_soc_pct=10,
+        )
+
+        sim.ac_charge_hours[:] = 0
+        sim.dc_charge_hours[:] = 1
+        sim.bat_discharge_hours[:] = 0
+
+        result = sim.simulate(start_hour=0)
+
+        # PV=3000, load=1000, surplus=2000 (SCR ≈ 1.0 for large surplus)
+        # DC-coupled: battery receives 2000 Wh directly
+        # Battery stores: 2000 * 0.90 = 1800 Wh, loss = 200 Wh
+        # No inverter loss on this path
+        hour_idx = 0
+        losses = result["Verluste_Pro_Stunde"][hour_idx]
+
+        # Battery charging loss = surplus * (1 - charging_eff)
+        # With DC coupling, losses should be ~200 Wh (only battery)
+        # No AC→DC inverter loss component
+        assert losses == pytest.approx(200.0, rel=0.05)
+
+    def test_ac_coupled_pv_has_ac_to_dc_loss(self, simulation_setup):
+        """AC-coupled PV: additional ac_to_dc_efficiency loss on charging."""
+        sim, akku, inverter = simulation_setup(
+            pv_dc_power_fraction=0.0,
+            ac_to_dc_efficiency=0.90,
+            battery_charging_efficiency=0.90,
+            pv_generation=3000.0,
+            load=1000.0,
+            battery_initial_soc_pct=10,
+        )
+
+        sim.ac_charge_hours[:] = 0
+        sim.dc_charge_hours[:] = 1
+        sim.bat_discharge_hours[:] = 0
+
+        result = sim.simulate(start_hour=0)
+
+        # PV=3000, load=1000, surplus=2000
+        # AC-coupled: surplus goes through AC→DC → battery
+        #   DC available = 2000 * 0.90 = 1800
+        #   Inverter loss = 2000 - 1800 = 200
+        #   Battery stores: 1800 * 0.90 = 1620, bat loss = 180
+        #   Total loss = 200 (inverter) + 180 (battery) = 380
+        hour_idx = 0
+        losses = result["Verluste_Pro_Stunde"][hour_idx]
+        assert losses == pytest.approx(380.0, rel=0.05)
+
+    def test_ac_coupled_higher_losses_than_dc(self, simulation_setup):
+        """AC-coupled total losses > DC-coupled for identical parameters."""
+        common = dict(
+            ac_to_dc_efficiency=0.90,
+            battery_charging_efficiency=0.90,
+            pv_generation=3000.0,
+            load=1000.0,
+            battery_initial_soc_pct=10,
+        )
+
+        sim_dc, _, _ = simulation_setup(pv_dc_power_fraction=1.0, **common)
+        sim_dc.ac_charge_hours[:] = 0
+        sim_dc.dc_charge_hours[:] = 1
+        sim_dc.bat_discharge_hours[:] = 0
+        result_dc = sim_dc.simulate(start_hour=0)
+
+        sim_ac, _, _ = simulation_setup(pv_dc_power_fraction=0.0, **common)
+        sim_ac.ac_charge_hours[:] = 0
+        sim_ac.dc_charge_hours[:] = 1
+        sim_ac.bat_discharge_hours[:] = 0
+        result_ac = sim_ac.simulate(start_hour=0)
+
+        assert result_ac["Gesamt_Verluste"] > result_dc["Gesamt_Verluste"]
+
+    def test_ac_coupled_less_battery_stored(self, simulation_setup):
+        """AC-coupled stores less energy per hour in battery than DC-coupled."""
+        common = dict(
+            ac_to_dc_efficiency=0.90,
+            battery_charging_efficiency=0.90,
+            pv_generation=3000.0,
+            load=1000.0,
+            battery_initial_soc_pct=10,
+        )
+
+        sim_dc, akku_dc, _ = simulation_setup(pv_dc_power_fraction=1.0, **common)
+        sim_dc.ac_charge_hours[:] = 0
+        sim_dc.dc_charge_hours[:] = 1
+        sim_dc.bat_discharge_hours[:] = 0
+        result_dc = sim_dc.simulate(start_hour=0)
+
+        sim_ac, akku_ac, _ = simulation_setup(pv_dc_power_fraction=0.0, **common)
+        sim_ac.ac_charge_hours[:] = 0
+        sim_ac.dc_charge_hours[:] = 1
+        sim_ac.bat_discharge_hours[:] = 0
+        result_ac = sim_ac.simulate(start_hour=0)
+
+        # Compare SOC after first hour (before battery saturates)
+        soc_dc_h0 = result_dc["akku_soc_pro_stunde"][0]
+        soc_ac_h0 = result_ac["akku_soc_pro_stunde"][0]
+        assert soc_ac_h0 < soc_dc_h0
+
+
+# ===================================================================
+# 7. PV storage opportunity cost penalty in evaluate()
+# ===================================================================
+
+
+class TestPvStorageOpportunityCostPenalty:
+    """Penalty guides the GA to store or export PV surplus optimally.
+
+    When optimize_dc_charge is True and pv_storage_opportunity_cost > 0:
+    - dc_charge=1 but export is worth more → penalty
+    - dc_charge=0 but storing would pay off later → penalty
+    - Correct decisions → no penalty
+    """
+
+    # Shared efficiency constants
+    AC_TO_DC = 0.93
+    DC_TO_AC = 0.95
+    BAT_CHARGE = 0.95
+    BAT_DISCHARGE = 0.95
+    # DC-coupled η_pv_rt = 0.95 * 0.95 * 0.95 = 0.857375
+    ETA_DC_RT = BAT_CHARGE * BAT_DISCHARGE * DC_TO_AC
+    # AC-coupled η_pv_rt = 0.93 * 0.95 * 0.95 * 0.95 = 0.797359
+    ETA_AC_RT = AC_TO_DC * BAT_CHARGE * BAT_DISCHARGE * DC_TO_AC
+    FEED_IN = 0.00008   # 8 ct/kWh
+
+    def _sim(self, *, pv=None, load=None, prices=None, dc_charge=None,
+             feed_in=None, pv_dc_power_fraction=1.0):
+        """Build a mock simulation for PV opportunity cost tests."""
+        n = 24
+        return _make_mock_simulation(
+            ac_to_dc_efficiency=self.AC_TO_DC,
+            dc_to_ac_efficiency=self.DC_TO_AC,
+            charging_efficiency=self.BAT_CHARGE,
+            discharging_efficiency=self.BAT_DISCHARGE,
+            pv_dc_power_fraction=pv_dc_power_fraction,
+            pv_prediction_wh=pv or [0.0] * n,
+            load_energy_array=load or [1000.0] * n,
+            elect_price_hourly=prices or [0.0003] * n,
+            dc_charge_hours=dc_charge or [0.0] * n,
+            elect_revenue_per_hour_arr=feed_in or [self.FEED_IN] * n,
+        )
+
+    # -----------------------------------------------------------------
+    # 7a. Penalty disabled by default (factor = 0)
+    # -----------------------------------------------------------------
+
+    def test_penalty_disabled_by_default(self, config_eos):
+        """With pv_storage_opportunity_cost=0.0 (default), no penalty fires."""
+        n = 24
+        # PV surplus with bad dc_charge decision
+        pv = [3000.0] * n
+        load = [1000.0] * n
+        dc_charge = [1.0] * n  # storing, but maybe export is better
+        # Very low future prices → storage_value < feed_in → normally penalised
+        prices = [0.00001] * n
+
+        sim = self._sim(pv=pv, load=load, prices=prices, dc_charge=dc_charge)
+        base = 1.0
+        fitness = _run_evaluate_with_mocked_sim(
+            config_eos, sim,
+            optimize_dc_charge=True,
+            pv_storage_opportunity_cost=0.0,
+            base_gesamtbilanz=base,
+        )
+        assert fitness == pytest.approx(base, abs=1e-9)
+
+    # -----------------------------------------------------------------
+    # 7b. No PV surplus → no penalty
+    # -----------------------------------------------------------------
+
+    def test_no_pv_surplus_no_penalty(self, config_eos):
+        """When PV <= load, there's no surplus and no penalty."""
+        n = 24
+        pv = [500.0] * n     # PV < load → no surplus
+        load = [1000.0] * n
+        dc_charge = [1.0] * n
+        prices = [0.00001] * n
+
+        sim = self._sim(pv=pv, load=load, prices=prices, dc_charge=dc_charge)
+        base = 2.0
+        fitness = _run_evaluate_with_mocked_sim(
+            config_eos, sim,
+            optimize_dc_charge=True,
+            pv_storage_opportunity_cost=1.0,
+            base_gesamtbilanz=base,
+        )
+        assert fitness == pytest.approx(base, abs=1e-9)
+
+    # -----------------------------------------------------------------
+    # 7c. Storing when export is better → penalty fires
+    # -----------------------------------------------------------------
+
+    def test_store_when_export_better_penalized(self, config_eos):
+        """dc_charge=1 when feed_in > storage_value → penalty added."""
+        n = 24
+        pv = [3000.0] + [0.0] * (n - 1)
+        load = [1000.0] * n
+        # Very low future prices → storage_value ≈ 0
+        prices = [0.00001] * n
+        dc_charge = [1.0] + [0.0] * (n - 1)  # store at hour 0
+        feed_in_arr = [self.FEED_IN] * n
+
+        sim = self._sim(pv=pv, load=load, prices=prices,
+                        dc_charge=dc_charge, feed_in=feed_in_arr)
+        base = 0.0
+        fitness = _run_evaluate_with_mocked_sim(
+            config_eos, sim,
+            optimize_dc_charge=True,
+            pv_storage_opportunity_cost=1.0,
+            base_gesamtbilanz=base,
+        )
+        # storage_value = max_future_price * η_dc_rt
+        # max future price = 0.00001 → storage_value ≈ 0.00001 * 0.857375 ≈ 8.57e-6
+        # feed_in = 0.00008 > storage_value → penalty fires
+        assert fitness > base + 1e-6
+
+    # -----------------------------------------------------------------
+    # 7d. Exporting when storage is better → penalty fires
+    # -----------------------------------------------------------------
+
+    def test_export_when_storage_better_penalized(self, config_eos):
+        """dc_charge=0 when storage_value > feed_in → penalty added."""
+        n = 24
+        pv = [3000.0] + [0.0] * (n - 1)
+        load = [1000.0] * n
+        # High future price → storage is valuable
+        prices = [0.0001] + [0.0005] * (n - 1)
+        dc_charge = [0.0] * n  # exporting at hour 0
+
+        sim = self._sim(pv=pv, load=load, prices=prices, dc_charge=dc_charge)
+        base = 0.0
+        fitness = _run_evaluate_with_mocked_sim(
+            config_eos, sim,
+            optimize_dc_charge=True,
+            pv_storage_opportunity_cost=1.0,
+            base_gesamtbilanz=base,
+        )
+        # storage_value = 0.0005 * 0.857375 = 0.000428688 > feed_in 0.00008 → penalty
+        assert fitness > base + 1e-6
+
+    # -----------------------------------------------------------------
+    # 7e. Correct decisions → no penalty
+    # -----------------------------------------------------------------
+
+    def test_correct_decision_no_penalty(self, config_eos):
+        """dc_charge matches the economically optimal choice → no penalty."""
+        n = 24
+        # Hour 0: high future price at hour 1 → storage is better → dc_charge=1 (correct)
+        # Hour 1: only low future prices after → export is better → dc_charge=0 (correct)
+        pv = [3000.0, 3000.0] + [0.0] * (n - 2)
+        load = [1000.0] * n
+        # Hour 0 sees best_future = prices[1] = 0.0005 → storage_value = 0.0005*0.857375 = 0.000429 > 0.00008
+        # Hour 1 sees best_future = max(prices[2:]) = 0.00001 → storage_value ≈ 8.57e-6 < 0.00008
+        prices = [0.0001, 0.0005] + [0.00001] * (n - 2)
+        dc_charge = [1.0, 0.0] + [0.0] * (n - 2)
+
+        sim = self._sim(pv=pv, load=load, prices=prices, dc_charge=dc_charge)
+        base = 0.0
+        fitness = _run_evaluate_with_mocked_sim(
+            config_eos, sim,
+            optimize_dc_charge=True,
+            pv_storage_opportunity_cost=1.0,
+            base_gesamtbilanz=base,
+        )
+        assert fitness == pytest.approx(base, abs=1e-9)
+
+    # -----------------------------------------------------------------
+    # 7f. Penalty scales with factor
+    # -----------------------------------------------------------------
+
+    def test_penalty_scales_with_factor(self, config_eos):
+        """Doubling pv_storage_opportunity_cost doubles the penalty."""
+        n = 24
+        pv = [3000.0] + [0.0] * (n - 1)
+        load = [1000.0] * n
+        prices = [0.00001] * n
+        dc_charge = [1.0] + [0.0] * (n - 1)  # store when export is better
+
+        def _fitness(factor):
+            sim = self._sim(pv=pv, load=load, prices=prices, dc_charge=dc_charge)
+            return _run_evaluate_with_mocked_sim(
+                config_eos, sim,
+                optimize_dc_charge=True,
+                pv_storage_opportunity_cost=factor,
+                base_gesamtbilanz=0.0,
+            )
+
+        f1 = _fitness(1.0)
+        f2 = _fitness(2.0)
+        assert f1 > 1e-9, "Penalty should fire"
+        assert f2 == pytest.approx(2.0 * f1, rel=1e-6)
+
+    # -----------------------------------------------------------------
+    # 7g. AC-coupled has lower storage value than DC-coupled
+    # -----------------------------------------------------------------
+
+    def test_ac_coupled_lower_storage_value(self, config_eos):
+        """AC-coupled η_pv_rt < DC-coupled → storage is less valuable, penalty fires earlier."""
+        n = 24
+        pv = [3000.0] + [0.0] * (n - 1)
+        load = [1000.0] * n
+        dc_charge = [1.0] + [0.0] * (n - 1)  # store at hour 0
+
+        # Choose a future price where:
+        #   DC-coupled: storage_value > feed_in  (no penalty)
+        #   AC-coupled: storage_value < feed_in  (penalty fires)
+        # DC η_pv_rt = 0.857375, AC η_pv_rt = 0.797359
+        # Need: feed_in / η_ac < future_price < feed_in / η_dc
+        #   0.00008 / 0.797359 ≈ 0.0001003
+        #   0.00008 / 0.857375 ≈ 0.0000933
+        # Pick future_price = 0.000097 → between thresholds
+        # DC: 0.000097 * 0.857375 = 0.0000832 > 0.00008 ✓ (no penalty)
+        # AC: 0.000097 * 0.797359 = 0.0000773 < 0.00008 ✗ (penalty fires)
+        future_price = 0.000097
+        prices = [0.0001] + [future_price] * (n - 1)
+
+        sim_dc = self._sim(pv=pv, load=load, prices=prices,
+                           dc_charge=dc_charge, pv_dc_power_fraction=1.0)
+        sim_ac = self._sim(pv=pv, load=load, prices=prices,
+                           dc_charge=dc_charge, pv_dc_power_fraction=0.0)
+
+        fitness_dc = _run_evaluate_with_mocked_sim(
+            config_eos, sim_dc,
+            optimize_dc_charge=True,
+            pv_storage_opportunity_cost=1.0,
+            base_gesamtbilanz=0.0,
+        )
+        fitness_ac = _run_evaluate_with_mocked_sim(
+            config_eos, sim_ac,
+            optimize_dc_charge=True,
+            pv_storage_opportunity_cost=1.0,
+            base_gesamtbilanz=0.0,
+        )
+
+        # DC: no penalty (storage is worth it), AC: penalty (storage not worth it)
+        assert fitness_dc == pytest.approx(0.0, abs=1e-9)
+        assert fitness_ac > 1e-6
+
+    # -----------------------------------------------------------------
+    # 7h. optimize_dc_charge=False → penalty never fires
+    # -----------------------------------------------------------------
+
+    def test_penalty_skipped_without_optimize_dc_charge(self, config_eos):
+        """With optimize_dc_charge=False, penalty never fires even if factor > 0."""
+        n = 24
+        pv = [3000.0] * n
+        load = [1000.0] * n
+        prices = [0.00001] * n  # terrible future prices
+        dc_charge = [1.0] * n  # storing when export is clearly better
+
+        sim = self._sim(pv=pv, load=load, prices=prices, dc_charge=dc_charge)
+        base = 1.0
+        fitness = _run_evaluate_with_mocked_sim(
+            config_eos, sim,
+            optimize_dc_charge=False,
+            pv_storage_opportunity_cost=5.0,
+            base_gesamtbilanz=base,
+        )
+        assert fitness == pytest.approx(base, abs=1e-9)

@@ -963,6 +963,82 @@ class GeneticOptimization(OptimizationBase):
                         excess_cost_per_wh = break_even_price - best_uncovered_price
                         gesamtbilanz += ac_wh * excess_cost_per_wh * ac_penalty_factor
 
+        # --- PV storage opportunity cost penalty ---
+        # When optimize_dc_charge is enabled the GA decides per-hour whether PV surplus
+        # charges the battery (dc_charge=1) or is exported (dc_charge=0).  This penalty
+        # amplifies the economic signal so the GA converges toward the optimal charging
+        # windows:
+        #   • dc_charge=1 but export would be worth more → penalty (don't store)
+        #   • dc_charge=0 but storing would pay off later → penalty (should store)
+        #
+        # The penalty is controlled by penalties["pv_storage_opportunity_cost"] (default 0).
+        if (
+            self.optimize_dc_charge
+            and self.simulation.battery
+            and self.simulation.inverter
+            and self.simulation.pv_prediction_wh is not None
+            and self.simulation.load_energy_array is not None
+            and self.simulation.elect_price_hourly is not None
+        ):
+            try:
+                pv_penalty_factor = float(
+                    self.config.optimization.genetic.penalties["pv_storage_opportunity_cost"]
+                )
+            except Exception:
+                pv_penalty_factor = 0.0
+
+            if pv_penalty_factor > 0:
+                inv = self.simulation.inverter
+                bat = self.simulation.battery
+                pv_arr = self.simulation.pv_prediction_wh
+                load_arr = self.simulation.load_energy_array
+                prices_arr = self.simulation.elect_price_hourly
+                dc_arr_raw = self.simulation.dc_charge_hours
+                dc_arr: np.ndarray = dc_arr_raw if dc_arr_raw is not None else np.ones(n)
+                n = len(prices_arr)
+
+                # PV→battery round-trip efficiency (weighted by DC/AC coupling fraction)
+                dc_frac = inv.pv_dc_power_fraction
+                ac_frac = 1.0 - dc_frac
+                # Effective AC→DC efficiency for the mix of DC- and AC-coupled PV
+                eta_ac_to_dc = dc_frac + ac_frac * inv.ac_to_dc_efficiency
+                eta_pv_store = eta_ac_to_dc * bat.charging_efficiency
+                eta_discharge = bat.discharging_efficiency * inv.dc_to_ac_efficiency
+                eta_pv_rt = eta_pv_store * eta_discharge
+
+                # Feed-in revenue array (may be scalar broadcast)
+                rev_arr_raw = self.simulation.elect_revenue_per_hour_arr
+                rev_arr: np.ndarray = rev_arr_raw if rev_arr_raw is not None else np.zeros(n)
+
+                for hour in range(start_hour, n):
+                    pv_surplus = float(pv_arr[hour]) - float(load_arr[hour])
+                    if pv_surplus <= 0:
+                        continue
+
+                    feed_in = float(rev_arr[hour]) if hour < len(rev_arr) else 0.0
+
+                    # Best future price where the stored energy could be discharged
+                    # (simplified: highest future electricity price in the horizon)
+                    best_future_price = 0.0
+                    for h in range(hour + 1, n):
+                        p = float(prices_arr[h])
+                        if p > best_future_price:
+                            best_future_price = p
+
+                    # Value of storing 1 Wh of PV surplus and discharging later
+                    storage_value = best_future_price * eta_pv_rt
+
+                    dc_flag = float(dc_arr[hour]) if hour < len(dc_arr) else 1.0
+
+                    if dc_flag > 0.5 and feed_in > storage_value:
+                        # Storing but export is worth more → shouldn't charge
+                        penalty_wh = pv_surplus * (feed_in - storage_value) * pv_penalty_factor
+                        gesamtbilanz += penalty_wh
+                    elif dc_flag <= 0.5 and storage_value > feed_in:
+                        # Exporting but storage would pay off → should charge
+                        penalty_wh = pv_surplus * (storage_value - feed_in) * pv_penalty_factor
+                        gesamtbilanz += penalty_wh
+
         if self.optimize_ev and parameters.eauto and self.simulation.ev:
             try:
                 penalty = self.config.optimization.genetic.penalties["ev_soc_miss"]
@@ -1145,6 +1221,12 @@ class GeneticOptimization(OptimizationBase):
                 parameters.inverter,
                 battery=akku,
             )
+
+        # Enable per-hour DC (PV→battery) charge optimisation from config
+        try:
+            self.optimize_dc_charge = bool(self.config.optimization.genetic.optimize_dc_charge)
+        except Exception:
+            self.optimize_dc_charge = False
 
         # Prepare device simulation
         self.simulation.prepare(

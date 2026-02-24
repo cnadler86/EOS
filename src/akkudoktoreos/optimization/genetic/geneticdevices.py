@@ -157,6 +157,23 @@ class InverterParameters(DeviceParameters):
         default=None,
         json_schema_extra={"description": "ID of battery", "examples": [None, "battery1"]},
     )
+    pv_dc_power_fraction: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={
+            "description": (
+                "Fraction of total installed PV peak power that is DC-coupled to this inverter's "
+                "DC bus (0.0 \u2013 1.0). Derived automatically from the pvforecast plane "
+                "'connected_to' field: planes whose 'connected_to' matches this inverter's "
+                "device_id (or the associated battery's device_id, or None) are counted as "
+                "DC-coupled; all others are AC-coupled. "
+                "1.0 = fully DC-coupled (default, backward compatible). "
+                "0.0 = fully AC-coupled (all PV surplus passes through AC\u2192DC conversion)."
+            ),
+            "examples": [1.0, 0.6, 0.0],
+        },
+    )
     ac_to_dc_efficiency: float = Field(
         default=1.0,
         ge=0,

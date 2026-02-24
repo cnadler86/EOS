@@ -144,6 +144,22 @@ class PVForecastPlaneSetting(SettingsBaseModel):
         },
     )
 
+    connected_to: Optional[str] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Device ID of the inverter or battery this PV plane is connected to. "
+                "If the ID matches the simulation inverter's device_id (or the associated "
+                "battery's device_id), the plane is treated as DC-coupled: PV power reaches "
+                "the battery without an additional AC\u2192DC conversion step. "
+                "If set to a different (separate) inverter ID, the plane is AC-coupled and "
+                "PV surplus passes through that inverter's AC bus before charging the battery. "
+                "None (default) = DC-coupled, backward compatible."
+            ),
+            "examples": [None, "inverter1", "pv_inverter_south"],
+        },
+    )
+
     @model_validator(mode="after")
     def validate_list_length(self) -> Self:
         # Check if either attribute is set and add to active planes

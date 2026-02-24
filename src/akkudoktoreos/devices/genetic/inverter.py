@@ -29,6 +29,9 @@ class Inverter:
         self.dc_to_ac_efficiency = self.parameters.dc_to_ac_efficiency
         self.ac_to_dc_efficiency = self.parameters.ac_to_dc_efficiency
         self.max_ac_charge_power_w = self.parameters.max_ac_charge_power_w
+        # Fraction of total PV peak power that is DC-coupled to this inverter's DC bus.
+        # 1.0 = fully DC-coupled (default), 0.0 = fully AC-coupled.
+        self.pv_dc_power_fraction = self.parameters.pv_dc_power_fraction
 
     def process_energy(
         self, generation: float, consumption: float, hour: int
@@ -83,13 +86,43 @@ class Inverter:
                     from_battery_ac = 0.0
 
                 if remaining_power > 0:
-                    # Load battery with excess energy (DC path, no inverter conversion needed)
+                    # Load battery with excess energy.
+                    # pv_dc_power_fraction determines which share of PV surplus is
+                    # already on the DC bus (no extra conversion loss) vs. AC-coupled
+                    # (must pass through AC→DC conversion before reaching the battery).
                     charge_losses = 0.0
                     if self.battery:
+                        dc_frac = self.pv_dc_power_fraction
+                        ac_frac = 1.0 - dc_frac
+                        ac_to_dc_eff = self.ac_to_dc_efficiency
+                        # Weighted DC-equivalent power available for battery charging:
+                        #   DC-coupled share  → enters battery without conversion loss
+                        #   AC-coupled share  → reduced by ac_to_dc_efficiency
+                        eff_weighted = dc_frac + ac_frac * ac_to_dc_eff
+                        dc_available = remaining_power * eff_weighted
+
                         charged_energie, charge_losses = self.battery.charge_energy(
-                            remaining_power, hour
+                            dc_available, hour
                         )
-                        remaining_surplus = remaining_power - (charged_energie + charge_losses)
+                        consumed_dc = charged_energie + charge_losses  # DC consumed by battery
+
+                        # Portion of consumed_dc that originated from the DC path vs. AC path
+                        if dc_available > 1e-9:
+                            alpha = (remaining_power * dc_frac) / dc_available
+                        else:
+                            alpha = dc_frac
+                        dc_from_dc = consumed_dc * alpha
+                        dc_from_ac = consumed_dc * (1.0 - alpha)
+
+                        # AC input required for the AC-coupled portion (back-compute)
+                        ac_input_for_ac = dc_from_ac / max(ac_to_dc_eff, 1e-9)
+                        pv_inverter_loss = ac_input_for_ac - dc_from_ac
+
+                        # Total AC consumed (DC path is 1:1, AC path back-computed)
+                        consumed_ac = dc_from_dc + ac_input_for_ac
+                        remaining_surplus = remaining_power - consumed_ac
+
+                        charge_losses += pv_inverter_loss
                     else:
                         remaining_surplus = remaining_power
 
