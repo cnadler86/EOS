@@ -26,15 +26,16 @@ class VrmForecastResponse(PydanticBaseModel):
 class LoadVrmCommonSettings(SettingsBaseModel):
     """Common settings for load forecast VRM API."""
 
-    load_vrm_token: str = Field(
-        default="your-token",
+    load_vrm_token: Optional[str] = Field(
+        default=None,
         json_schema_extra={
             "description": "Token for Connecting VRM API",
             "examples": ["your-token"],
         },
     )
-    load_vrm_idsite: int = Field(
-        default=12345, json_schema_extra={"description": "VRM-Installation-ID", "examples": [12345]}
+    load_vrm_idsite: Optional[int] = Field(
+        default=None,
+        json_schema_extra={"description": "VRM-Installation-ID", "examples": [12345]},
     )
 
 
@@ -59,12 +60,11 @@ class LoadVrm(LoadProvider):
             logger.error(f"VRM-API schema validation failed:\n{error_msg}")
             raise ValueError(error_msg)
 
-    def _request_forecast(self, start_ts: int, end_ts: int) -> VrmForecastResponse:
+    def _request_forecast(
+        self, start_ts: int, end_ts: int, installation_id: int, api_token: str
+    ) -> VrmForecastResponse:
         """Fetch forecast data from Victron VRM API."""
         base_url = "https://vrmapi.victronenergy.com/v2/installations"
-        installation_id = self.config.load.provider_settings.LoadVrm.load_vrm_idsite
-        api_token = self.config.load.provider_settings.LoadVrm.load_vrm_token
-
         url = f"{base_url}/{installation_id}/stats?type=forecast&start={start_ts}&end={end_ts}&interval=hours"
         headers = {"X-Authorization": f"Token {api_token}", "Content-Type": "application/json"}
 
@@ -85,13 +85,20 @@ class LoadVrm(LoadProvider):
 
     def _update_data(self, force_update: Optional[bool] = False) -> None:
         """Fetch and store VRM load forecast as loadforecast_power_w and related values."""
+        if not self.enabled():
+            return
+
+        vrm_settings = self.config.load.loadvrm
+        installation_id = vrm_settings.load_vrm_idsite
+        api_token = vrm_settings.load_vrm_token
+
         start_date = self.ems_start_datetime.start_of("day")
         end_date = self.ems_start_datetime.add(hours=self.config.prediction.hours)
         start_ts = int(start_date.timestamp())
         end_ts = int(end_date.timestamp())
 
         logger.info(f"Updating Load forecast from VRM: {start_date} to {end_date}")
-        vrm_forecast_data = self._request_forecast(start_ts, end_ts)
+        vrm_forecast_data = self._request_forecast(start_ts, end_ts, installation_id, api_token)
 
         loadforecast_power_w_data = []
         for timestamp, value in vrm_forecast_data.records.vrm_consumption_fc:
