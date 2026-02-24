@@ -11,6 +11,7 @@ import traceback
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, AsyncGenerator, Dict, List, Optional, Union
 
+import pendulum
 import psutil
 import uvicorn
 from fastapi import Body, FastAPI
@@ -674,7 +675,13 @@ def fastapi_measurement_value_put(
             logger.debug(
                 f'/v1/measurement/value key: {key} value: "{value}" - string value not convertable to float'
             )
-    get_measurement().update_value(datetime, key, value)
+    try:
+        dt = pendulum.parse(datetime)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid datetime '{datetime}': {exc}")
+    if dt is None:
+        raise HTTPException(status_code=422, detail=f"Could not parse datetime '{datetime}'")
+    get_measurement().update_value(dt, key, value)
     pdseries = get_measurement().key_to_series(key=key)
     return PydanticDateTimeSeries.from_series(pdseries)
 
