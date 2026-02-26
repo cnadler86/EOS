@@ -85,7 +85,7 @@ class JobState:
             if value is None:
                 return None
             return float(value) if value else self.fallback_interval
-        except (KeyError, IndexError, AttributeError):  # noqa: BLE001
+        except (KeyError, IndexError, AttributeError) as exc:  # noqa: BLE001
             logger.warning(
                 "RetentionManager: config key '{}' failed with {!r}, using fallback {}s",
                 self.interval_attr,
