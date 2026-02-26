@@ -102,7 +102,7 @@ class JobState:
             if value is None:
                 return None
             return float(value) if value else self.fallback_interval
-        except (KeyError, IndexError):
+        except (KeyError, IndexError, AttributeError):  # noqa: BLE001
             logger.warning(
                 "RetentionManager: config key '{}' not found, using fallback {}s",
                 self.interval_attr,
