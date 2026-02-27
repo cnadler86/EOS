@@ -14,11 +14,15 @@ Only **Python 3.13** is supported on ARMv7.
 
 ```toml
 [tool.uv]
-extra-index-url = ["https://www.piwheels.org/simple/"]
 index-strategy = "unsafe-best-match"
+
+[[tool.uv.index]]
+name = "piwheels"
+url = "https://www.piwheels.org/simple/"
+marker = "platform_machine == 'armv7l'"
 ```
 
-`index-strategy = "unsafe-best-match"` is required because piwheels only carries a subset of packages and versions. Without it, uv stops at the first index that contains a given package (piwheels) and fails if the needed version isn't there. This setting tells uv to consider versions from all indexes and pick the best match.
+`marker = "platform_machine == 'armv7l'"` restricts piwheels to armv7l resolutions only — it is never consulted on x86_64, aarch64, or other platforms. `index-strategy = "unsafe-best-match"` is required because piwheels only carries a subset of packages and versions; without it, uv stops at the first index containing a package and fails if the pinned version isn't there.
 
 When using plain `pip`, add piwheels to your pip configuration:
 
