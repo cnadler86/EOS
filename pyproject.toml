@@ -30,14 +30,17 @@ dependencies = [
     "mdit-py-plugins==0.5.0",
     "bokeh==3.8.2",
     "uvicorn==0.41.0",
-    "scipy==1.17.1",
+    "scipy==1.17.1 ; platform_machine != 'armv7l'",
+    "scipy==1.17.0 ; platform_machine == 'armv7l'",  # 1.17.1 build pending on piwheels
     "tzfpy==1.1.1",
-    "deap==1.4.3",
+    "deap==1.4.3 ; platform_machine != 'armv7l'",
+    "deap==1.4.2 ; platform_machine == 'armv7l'",    # 1.4.3 has no cp313 armv7l wheel on piwheels
     "requests==2.32.5",
     "pandas==3.0.1",
     "pendulum==3.2.0",
     "platformdirs==4.9.2",
-    "psutil==7.2.2",
+    "psutil==7.2.2 ; platform_machine != 'armv7l'",
+    "psutil==6.0.0 ; platform_machine == 'armv7l'",  # psutil 7.x entirely skipped on piwheels (issue #580)
     "pvlib==0.15.0",
     "pydantic==2.12.5",
     "pydantic_extra_types==2.11.0",
@@ -46,6 +49,9 @@ dependencies = [
     "linkify-it-py==2.0.3",
     "loguru==0.7.3",
     "lmdb==1.7.5",
+    # Transitive dep constraints for ARMv7 compatibility:
+    # pillow 12.1.1 has no cp313 armv7l wheel on piwheels; 12.1.0 does.
+    "pillow==12.1.0 ; platform_machine == 'armv7l'",
 ]
 
 [project.optional-dependencies]
@@ -92,6 +98,11 @@ Issues = "https://github.com/Akkudoktor-EOS/EOS/issues"
 [build-system]
 requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv]
+# piwheels provides pre-built ARM7 (armv7l) wheels for Python packages.
+# This extra index is required for installations on Raspberry Pi and similar ARMv7 devices.
+extra-index-url = ["https://www.piwheels.org/simple/"]
 
 [tool.setuptools.dynamic]
 # version.txt must be generated
