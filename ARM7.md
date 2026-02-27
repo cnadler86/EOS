@@ -120,6 +120,16 @@ pip config set global.extra-index-url https://www.piwheels.org/simple/
 pip install -e .
 ```
 
+### h5py
+
+It might be that h5py needs a specific linked library. In this case, you have to build the wheel at the target
+
+```bash
+uv cache clean h5py
+uv pip uninstall h5py
+uv pip install --no-binary h5py h5py
+```
+
 ### System Libraries Required on Raspberry Pi OS
 
 Some packages depend on system libraries that must be installed via `apt`:
@@ -154,7 +164,7 @@ else:
 
 Check piwheels status for a package:
 
-```
+```text
 https://www.piwheels.org/project/<package-name>/
 ```
 
