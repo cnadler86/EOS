@@ -103,6 +103,10 @@ build-backend = "setuptools.build_meta"
 # piwheels provides pre-built ARM7 (armv7l) wheels for Python packages.
 # This extra index is required for installations on Raspberry Pi and similar ARMv7 devices.
 extra-index-url = ["https://www.piwheels.org/simple/"]
+# Required because piwheels only carries a subset of packages/versions.
+# Without this, uv stops at the first index that contains a package (piwheels),
+# and fails if the required version isn't there. "unsafe-best-match" searches all indexes.
+index-strategy = "unsafe-best-match"
 
 [tool.setuptools.dynamic]
 # version.txt must be generated
