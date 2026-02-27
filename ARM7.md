@@ -53,6 +53,7 @@ Certain packages require version downgrades on ARMv7 because the versions pinned
 | `pillow` | `12.1.1` (via matplotlib) | `12.1.0` | pillow 12.1.1 has only cp311 armv7l on piwheels, no cp313; 12.1.0 has cp313 |
 | `lxml` | `6.0.2` (transitive) | `6.0.1` | lxml 6.0.2 has only cp311 armv7l on piwheels, no cp313; 6.0.1 has cp313 |
 | `markupsafe` | `3.0.3` (transitive) | `3.0.2` | markupsafe 3.0.3 has only cp311 armv7l on piwheels, no cp313; 3.0.2 has cp313 |
+| `uvloop` | `0.22.1` (transitive) | `0.21` | uvloop 0.22.1 has no armv7l cp313 wheels on piwheels; only 0.21 available |
 
 ---
 

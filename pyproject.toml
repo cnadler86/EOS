@@ -56,6 +56,8 @@ dependencies = [
     "lxml==6.0.1 ; platform_machine == 'armv7l'",
     # markupsafe 3.0.3 has only cp311 armv7l on piwheels; 3.0.2 has cp313.
     "markupsafe==3.0.2 ; platform_machine == 'armv7l'",
+    # uvloop 0.22.1 has no armv7l wheels on piwheels; only 0.21 available.
+    "uvloop==0.21 ; platform_machine == 'armv7l'",
 ]
 
 [project.optional-dependencies]
