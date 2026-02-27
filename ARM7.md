@@ -52,6 +52,7 @@ Certain packages require version downgrades on ARMv7 because the versions pinned
 |---|---|---|---|
 | `pillow` | `12.1.1` (via matplotlib) | `12.1.0` | pillow 12.1.1 has only cp311 armv7l on piwheels, no cp313; 12.1.0 has cp313 |
 | `lxml` | `6.0.2` (transitive) | `6.0.1` | lxml 6.0.2 has only cp311 armv7l on piwheels, no cp313; 6.0.1 has cp313 |
+| `markupsafe` | `3.0.3` (transitive) | `3.0.2` | markupsafe 3.0.3 has only cp311 armv7l on piwheels, no cp313; 3.0.2 has cp313 |
 
 ---
 
@@ -104,6 +105,7 @@ Pure-Python packages (no binary component, platform-independent):
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install the project (piwheels is already configured as extra index)
+uv venv --python 3.13
 uv sync
 ```
 
