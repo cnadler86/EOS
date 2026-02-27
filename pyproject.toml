@@ -52,6 +52,8 @@ dependencies = [
     # Transitive dep constraints for ARMv7 compatibility:
     # pillow 12.1.1 has no cp313 armv7l wheel on piwheels; 12.1.0 does.
     "pillow==12.1.0 ; platform_machine == 'armv7l'",
+    # lxml 6.0.2 has only cp311 armv7l on piwheels; 6.0.1 has cp313.
+    "lxml==6.0.1 ; platform_machine == 'armv7l'",
 ]
 
 [project.optional-dependencies]

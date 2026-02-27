@@ -51,6 +51,7 @@ Certain packages require version downgrades on ARMv7 because the versions pinned
 | Package | Other platforms | ARMv7 | Reason |
 |---|---|---|---|
 | `pillow` | `12.1.1` (via matplotlib) | `12.1.0` | pillow 12.1.1 has only cp311 armv7l on piwheels, no cp313; 12.1.0 has cp313 |
+| `lxml` | `6.0.2` (transitive) | `6.0.1` | lxml 6.0.2 has only cp311 armv7l on piwheels, no cp313; 6.0.1 has cp313 |
 
 ---
 
